@@ -17,7 +17,6 @@ The repository is organized as follows:
 
 - `code/` directory: Contains the code for data preprocessing, exploratory data analysis, model building, and evaluation for both datasets.
 - `data/` directory: Contains the raw data used in the analysis.
-- `report/` directory: Contains the report summarizing our findings, including detailed descriptions of the datasets, data preprocessing steps, exploratory data analysis, model selection, and performance evaluation.
 - `README.md` file: Provides an overview of the project and repository structure.
 
 ## Results and Conclusion
@@ -26,7 +25,7 @@ Our analysis highlights the effectiveness of different machine learning techniqu
 
 Based on our findings, we recommend using logistic regression as the best model for predicting employee attrition in the IBM dataset. However, further research and experimentation may be required to determine the optimal model for predicting concrete compressive strength.
 
-For more detailed information and analysis, please refer to the [report](report/report.pdf).
+For more detailed information and analysis, please refer to the [report].
 
 ## Contributions
 
