@@ -17,7 +17,6 @@ The repository is organized as follows:
 
 - `code/` directory: Contains the code for data preprocessing, exploratory data analysis, model building, and evaluation for both datasets.
 - `data/` directory: Contains the raw data used in the analysis.
-- `README.md` file: Provides an overview of the project and repository structure.
 
 ## Results and Conclusion
 
