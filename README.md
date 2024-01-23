@@ -24,9 +24,5 @@ Our analysis highlights the effectiveness of different machine learning techniqu
 
 Based on our findings, we recommend using logistic regression as the best model for predicting employee attrition in the IBM dataset. However, further research and experimentation may be required to determine the optimal model for predicting concrete compressive strength.
 
-For more detailed information and analysis, please refer to the [report].
-
-## Contributions
-
-Each group member has contributed equally to this project, with a contribution percentage of 33.33% for each member.
+For more detailed information and analysis, please refer to the report.
 
