@@ -1,0 +1,209 @@
+---
+title: "Untitled"
+author: "Yi Lin Ye"
+date: "11/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(lattice)
+library(ggplot2)
+library(plyr)
+library(DMwR)
+library(dummies)
+library(car)
+library(corrplot)
+Attrition1<- read.csv("HR-Employee-Attrition.csv")
+Attrition <- read.csv("HR-Employee-Attrition.csv")
+head(Attrition)
+summary(Attrition)
+names(Attrition)
+cat("Samples: ", nrow(Attrition), "\nFeatures: ", ncol(Attrition), "\n")
+table(sapply(Attrition, class))
+
+#check missing value (no missing values)
+sapply(Attrition, function(x) sum(is.na(x)))
+
+```
+
+```{r}
+#Removing Variables whose value is not changing
+Attrition <- Attrition[,-c(9,10,22,27)]
+
+
+# Changing the class of variable from numeric to factor
+factor.col=c("Education","EnvironmentSatisfaction","JobInvolvement",
+             "JobLevel","JobSatisfaction","StockOptionLevel",
+             "PerformanceRating","RelationshipSatisfaction",
+             "WorkLifeBalance")
+
+Attrition[factor.col] <- lapply(Attrition[factor.col], factor)
+
+
+Attrition[,"Attrition"] <- ifelse(Attrition[,"Attrition"]=="Yes",1,0)
+
+```
+
+Exploratory data analysis
+
+```{r}
+#Attrition imbalance in the dataset, attrition rate: 0.161
+sub_data_0 <-  as.factor(Attrition$Attrition)
+level_0 <-  levels(sub_data_0)
+count_0 <- plyr::count(sub_data_0)
+attrition_perc <- data.frame(AttritionStatus = level_0, Percentage = round(count_0[, 2]/sum(count_0[, 2]),3))
+
+  
+#which education field contributes most to attrition: Life Science--0.376
+sub_data_1 <- cbind(Attrition$Attrition, Attrition$EducationField)
+level_1 <- levels(as.factor(Attrition$EducationField))
+Pi_1 <- apply(sub_data_1,1,paste0,collapse="_") #combine the two columns into a vector
+count_1 <- plyr::count(Pi_1)
+edu_perc <- data.frame(EducationField = level_1, Percentage = round(count_1[7:12, 2]/sum(count_1[7:12, 2]),3)) #those with attrition=1
+edu_perc <- edu_perc[order(edu_perc$Percentage, decreasing = TRUE), ]
+
+#which job role contributes most to attrition: Laboratory Technician, Sales Executive, Research Scientist
+sub_data_2 <- cbind(Attrition$Attrition, Attrition$JobRole)
+level_2 <- levels(as.factor(Attrition$JobRole))
+Pi_2 <- apply(sub_data_2,1,paste0,collapse="_");
+count_2 <- plyr::count(Pi_2)
+temp <- count_2[10: nrow(count_2), ]
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+temp <- temp[order(temp$freq, decreasing = TRUE), ]
+job_perc <- data.frame(temp)
+
+#Empolyee with rather high education level and high job involvment tend to move forward in their careers
+sub_data_3 <- cbind(Attrition$Attrition, Attrition$Education, Attrition$JobInvolvement)
+level_3 <- levels(Attrition$Education)
+Pi_3 <- apply(sub_data_3,1,paste0,collapse="_");
+count_3 <- plyr::count(Pi_3)
+temp <- count_3[21: nrow(count_3), ]
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+temp <- temp[order(temp$freq, decreasing = TRUE), ]
+edu_job_perc <- data.frame(temp)
+
+#Empolyee with rather high education level and young age tend to move forward in their careers
+sub_data_4 <- cbind(Attrition$Attrition, Attrition$Education, Attrition$Age)
+level_4 <- levels(Attrition$Education)
+Pi_4 <- apply(sub_data_4,1,paste0,collapse="_");
+count_4 <- plyr::count(Pi_4)
+temp <- count_4[178: nrow(count_4), ]
+temp <- head(temp[order(temp$freq, decreasing = TRUE), ])
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+edu_age_perc <- data.frame(temp)
+
+```
+
+```{r}
+Attrition$TotalSatisfaction <- as.numeric(Attrition$EnvironmentSatisfaction)+ 
+                               as.numeric(Attrition$JobInvolvement)+
+                               as.numeric(Attrition$JobSatisfaction)+
+                               as.numeric(Attrition$RelationshipSatisfaction)+
+                               as.numeric(Attrition$WorkLifeBalance)
+Attrition <- Attrition[,-c(9,12,15,23,27)]
+Attrition$AgeGroup <- as.factor(ifelse(Attrition$Age<=24,"Young", ifelse(Attrition$Age<=54,"Middle-Age","Adult"))) #add a column AgeGroup
+Attrition <- Attrition[,-c(1)] #delete the original column
+
+
+Attrition <- model.frame(lm1<-lm(Attrition ~., data = Attrition),Attrition)Attrition_matrix <- model.matrix(lm1<-lm(Attrition ~., data = Attrition), data=Attrition) #only gives the design matrix
+Attrition_matrix <- Attrition_matrix[,-c(1)] #delete the intercept column
+Attrition_with_dummies <- as.data.frame(Attrition_matrix)
+Attrition1 <- read.csv("HR-Employee-Attrition.csv")
+Attrition1[,"Attrition"] <- ifelse(Attrition1[,"Attrition"]=="Yes",1,0)
+cbind(Attrition1[,"Attrition"],Attrition_with_dummies)
+colnames(Attrition_with_dummies)[1] <- "Attrition" #rename the Attrition column
+
+```
+
+Splitting data
+```{r}
+
+set.seed(0)
+train_index <- sample(1:nrow(Attrition_with_dummies), nrow(Attrition_with_dummies)*0.7)
+
+train_df <- Attrition_with_dummies[train_index,]
+test_df <- Attrition_with_dummies[-train_index,]
+```
+
+Feature Engineering
+`
+```{r}
+#Variable Selection (VIF)
+library(car)
+vif_output <- lm(Attrition ~., data = train_df)
+names(vif_output$coefficients[is.na(vif_output$coefficients)])
+vif_res <- car::vif(vif_output)
+summary(vif_res)
+print(vif_res)
+
+vif_names <- names(vif_res)
+vif_res_new <- vif_res
+while(any(vif_res_new > 2)){
+  var_with_max_vif <- names(which(vif_res_new == max(vif_res_new)))
+  vif_names <- vif_names[!(vif_names) %in% var_with_max_vif]
+  def_form <- as.formula(paste("Attrition ~" ,paste(vif_names, collapse = " +"),sep = ""))
+  vif_output <- lm(def_form, data = train_df)
+  vif_res_new <- car::vif(vif_output)
+}
+summary(vif_res_new)
+print(vif_res_new)
+
+#vairables need to be removed
+Multicollinearity_vars <-  names(vif_res)[which(! names(vif_res) %in% names(vif_res_new))]
+
+train_df <- train_df[,!(names(train_df) %in% Multicollinearity_vars)]
+test_df <- test_df[,!(names(train_df) %in% Multicollinearity_vars)]
+
+#scale the data:
+numeric=c("Age","DailyRate","DistanceFromHome","HourlyRate","MonthlyIncome","MonthlyRate","NumCompaniesWorked","PercentSalaryHike","YearsAtCompany","YearsInCurrentRole","YearsSinceLastPromotion","YearsWithCurrManager","TotalWorkingYears","TrainingTimesLastYear","StockOptionLevel")
+
+train.num=scale(train_df[,names(train_df) %in% numeric])
+train.scale=cbind(train_df[,!names(train_df) %in% numeric],train.num)
+
+test.num=scale(test_df[,names(test_df) %in% numeric])
+test.scale=cbind(test_df[,!names(test_df) %in% numeric],test.num)
+```
+
+Oversampling to overcome the imbalance nature of the data
+```{r}
+p=prop.table(table(train.scale$Attrition))
+cat("Before SMOTE the propotions are:"); print(p,row.names=FALSE)
+set.seed(0)
+#train.scale$Attrition <- as.factor(train.scale$Attrition)
+smote_train=SMOTE(Attrition ~ .,data=train.scale)
+q=prop.table(table(smote_train$Attrition))
+cat("After SMOTE the propotions are:"); print(q,row.names=FALSE)
+```
+
+Logistic Regression
+```{r}
+#fit the model on training set
+glm_fit = glm(Attrition ~.,
+              data = train.scale,
+              family = binomial)
+summary(glm_fit)
+#predict on testing test
+glm_probs = predict(glm_fit, test.scale, type = "response")
+
+# For predicted probabilities greater than 0.5, assign Y to be "Up"; otherwise assign Y to be "Down"
+glm_pred = rep(0, nrow(test.scale))
+glm_pred[glm_probs > .5] = 1
+
+# Create testing data for Y
+Attrition_test = Attrition_with_dummies$Attrition[-train_index]
+# Confusion matrix
+table(glm_pred, Attrition_test)
+# Proportation of make correct classification
+mean(glm_pred==Attrition_test)
+# Misclassfication error rate
+# glm_pred is the predicted Y for testing data and Attrition_test is the true Y for testing data
+mean(glm_pred!=Attrition_test)
+```
+
+
+

@@ -1,0 +1,565 @@
+---
+title: "ST443 Group Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+Attrition <- read.csv("HR-Employee-Attrition.csv",stringsAsFactors = TRUE)
+#summary(Attrition)
+
+#Removing Variables whose value is not changing
+Attrition <- Attrition[,-c(9,10,22,27)]
+#we drop EmployeeCount EmployeeNumber Over18 OverTime
+
+
+#Changing the class of variable from numeric to factor
+factor.col=c("Education","EnvironmentSatisfaction","JobInvolvement",
+             "JobLevel","JobSatisfaction","StockOptionLevel",
+             "PerformanceRating","RelationshipSatisfaction",
+             "WorkLifeBalance")
+
+Attrition[factor.col] <- lapply(Attrition[factor.col], factor)
+
+
+```
+
+EDA
+```{r}
+#which education field contributes most to attrition: Life Science--0.376
+sub_data_1 <- cbind(Attrition$Attrition, Attrition$EducationField)
+level_1 <- levels(as.factor(Attrition$EducationField))
+Pi_1 <- apply(sub_data_1,1,paste0,collapse="_") #combine the two columns into a vector
+count_1 <- plyr::count(Pi_1)
+edu_perc <- data.frame(EducationField = level_1, Percentage = round(count_1[7:12, 2]/sum(count_1[7:12, 2]),3)) #those with attrition=1
+edu_perc <- edu_perc[order(edu_perc$Percentage, decreasing = TRUE), ]
+
+#which job role contributes most to attrition: Laboratory Technician, Sales Executive, Research Scientist
+sub_data_2 <- cbind(Attrition$Attrition, Attrition$JobRole)
+level_2 <- levels(as.factor(Attrition$JobRole))
+Pi_2 <- apply(sub_data_2,1,paste0,collapse="_");
+count_2 <- plyr::count(Pi_2)
+temp <- count_2[10: nrow(count_2), ]
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+temp <- temp[order(temp$freq, decreasing = TRUE), ]
+job_perc <- data.frame(temp)
+
+#Empolyee with rather high education level and high job involvment tend to move forward in their careers
+sub_data_3 <- cbind(Attrition$Attrition, Attrition$Education, Attrition$JobInvolvement)
+level_3 <- levels(Attrition$Education)
+Pi_3 <- apply(sub_data_3,1,paste0,collapse="_");
+count_3 <- plyr::count(Pi_3)
+temp <- count_3[21: nrow(count_3), ]
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+temp <- temp[order(temp$freq, decreasing = TRUE), ]
+edu_job_perc <- data.frame(temp)
+
+#Empolyee with rather high education level and young age tend to move forward in their careers
+sub_data_4 <- cbind(Attrition$Attrition, Attrition$Education, Attrition$Age)
+level_4 <- levels(Attrition$Education)
+Pi_4 <- apply(sub_data_4,1,paste0,collapse="_");
+count_4 <- plyr::count(Pi_4)
+temp <- count_4[178: nrow(count_4), ]
+temp <- head(temp[order(temp$freq, decreasing = TRUE), ])
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+edu_age_perc <- data.frame(temp)
+
+#employee with a bachelor degree have the most incentive to leave the company
+sub_data_5 <- cbind(Attrition$Attrition, Attrition$Education)
+level_5 <- levels(as.factor(Attrition$Education))
+Pi_5 <- apply(sub_data_5,1,paste0,collapse="_") #combine the two columns into a vector
+count_5 <- plyr::count(Pi_5)
+edu_attri <- data.frame(Education = level_5, Percentage = round(count_4[6:10, 2]/sum(count_4[6:10, 2]),3)) #those with attrition=1
+edu_attri_perc <- edu_attri[order(edu_attri$Percentage, decreasing = TRUE), ]
+```
+
+Group variables 
+```{r}
+Attrition$TotalSatisfaction <- as.numeric(Attrition$EnvironmentSatisfaction)+ 
+                               as.numeric(Attrition$JobInvolvement)+
+                               as.numeric(Attrition$JobSatisfaction)+
+                               as.numeric(Attrition$RelationshipSatisfaction)+
+                               as.numeric(Attrition$WorkLifeBalance)
+Attrition <- Attrition[,-c(9,12,15,23,27)]
+Attrition$AgeGroup <- as.factor(ifelse(Attrition$Age<=24,"Young", ifelse(Attrition$Age<=54,"Middle-Age","Adult"))) #add a column AgeGroup
+Attrition <- Attrition[,-c(1)] #delete the original column
+
+num.col <- unlist(lapply(Attrition, is.numeric))
+factor.col <- unlist(lapply(Attrition, is.factor))
+Attrition.numeric <- Attrition[,num.col]
+Attrition.factor <- Attrition[,factor.col]
+Attrition.numeric.scale <- scale(Attrition.numeric)
+Attrition <- cbind(Attrition.factor,Attrition.numeric.scale)
+Attrition[,"Attrition"] <- ifelse(Attrition[,"Attrition"]=="Yes",1,0)
+```
+
+Convert factors to dummies
+```{r}
+
+Attrition_matrix <- model.matrix(lm1<-lm(Attrition ~., data = Attrition), data=Attrition) #only gives the design matrix
+Attrition_matrix <- Attrition_matrix[,-c(1)] #delete the intercept column
+Attrition_with_dummies <- as.data.frame(Attrition_matrix)
+Attrition_origin <- read.csv("HR-Employee-Attrition.csv")
+#Attrition_origin[,"Attrition"] <- ifelse(Attrition_origin[,"Attrition"]=="Yes",1,0)
+Attrition_with_dummies = cbind(Attrition_origin[,"Attrition"],Attrition_with_dummies)
+colnames(Attrition_with_dummies)[1] <- "Attrition" #rename the Attrition column
+```
+
+Imbalanced Data Problem
+```{r}
+#Attrition imbalance in the dataset, attrition rate: 0.161
+sub_data_0 <-  as.factor(Attrition_with_dummies$Attrition)
+count_0 <- plyr::count(sub_data_0)
+attrition_perc <- data.frame(AttritionStatus = levels(sub_data_0), Percentage = round(count_0[, 2]/sum(count_0[,2]),3))
+```
+
+
+```{r}
+# Helper packages
+library(dplyr)       # for data wrangling
+library(doParallel)  # for parallel backend to foreach
+library(foreach)     # for parallel processing with for loops
+library(iterators)
+library(parallel)
+# Modeling packages
+library(lattice)
+library(ggplot2)
+library(grid)
+library(DMwR)        # for smote method
+library(caret)       # for general model fitting
+library(rpart)       # for fitting decision trees
+library(ipred)       # for fitting bagged decision trees
+```
+
+Conduct SMOTE inside of resampling 
+```{r}
+# simple 10-fold CV
+ctrl <- trainControl(method = "cv", 
+                     number = 10,
+                     savePredictions = "final",
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary)
+
+# 10-fold CV with SMOTE being used
+ctrl_smote <- trainControl(method = "cv", 
+                     number = 10,
+                     savePredictions = "final",
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary,
+                     sampling = "smote"
+                     )
+
+# stratified 10-fold CV 
+cvIndex <- createFolds(factor(Attrition_with_dummies$Attrition), 10, returnTrain = T)
+ctrl_stratified <- trainControl(index = cvIndex,savePredictions = "final",
+               method = 'cv', classProbs = TRUE, summaryFunction = twoClassSummary,
+               number = 10)
+```
+Lists to store results
+```{r}
+models_original <- list()
+models_smote <- list()
+models_stf <- list()
+```
+
+model 1: logistic regression
+```{r}
+
+set.seed(1)
+logistic_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glm",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl)
+
+
+logistic_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glm",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl_smote)
+
+
+logistic_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glm",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl_stratified)
+print(logistic_fit_stratified)
+models_original$Logistic <- logistic_fit
+models_smote$Logistic <- logistic_fit_smote
+models_stf$Logistic <- logistic_fit_stratified
+```
+
+
+model 2: knn, k = 5,7,9
+```{r}
+set.seed(1)
+knn_fit <- train(Attrition ~ ., data =  Attrition_with_dummies,
+                      method = "knn",
+                      metric = "ROC",
+                      trControl = ctrl)
+
+knn_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "knn",
+                      metric = "ROC",
+                      trControl = ctrl_smote)
+
+knn_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "knn",
+                      metric = "ROC",
+                      trControl = ctrl_stratified)
+print(knn_fit_stratified)
+models_original$KNN <- knn_fit
+models_smote$KNN <- knn_fit_smote
+models_stf$KNN <- knn_fit_stratified
+```
+model 3: decision tree
+```{r}
+set.seed(1)
+colnames(Attrition_with_dummies) <- make.names(colnames(Attrition_with_dummies))
+rpart_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "rpart",
+                      metric = "ROC",
+                      trControl = ctrl)
+
+rpart_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "rpart",
+                      metric = "ROC",
+                      trControl = ctrl_smote)
+
+rpart_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "rpart",
+                      metric = "ROC",
+                      trControl = ctrl_stratified)
+print(rpart_fit_stratified)
+models_original$DecisionTree <- rpart_fit
+models_smote$DecisionTree <- rpart_fit_smote
+models_stf$DecisionTree <- rpart_fit_stratified
+```
+
+model 4: random forest
+```{r}
+library(randomForest)
+set.seed(1)
+rf_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "rf",
+                      metric = "ROC",
+                      trControl = ctrl)
+
+rf_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "rf",
+                      metric = "ROC",
+                      trControl = ctrl_smote)
+
+rf_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "rf",
+                      metric = "ROC",
+                      trControl = ctrl_stratified)
+print(rf_fit_stratified)
+
+models_original$RandomForest <- rf_fit
+models_smote$RandomForest <- rf_fit_smote
+models_stf$RandomForest <- rf_fit_stratified
+```
+model 5: boosting
+```{r}
+library(gbm)
+set.seed(1)
+garbage <- capture.output(gbm_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "gbm",
+                      metric = "ROC",
+                      trControl = ctrl))
+
+
+garbage <- capture.output(gbm_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "gbm",
+                      metric = "ROC",
+                      trControl = ctrl_smote))
+
+garbage <- capture.output(gbm_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "gbm",
+                      metric = "ROC",
+                      trControl = ctrl_stratified))
+print(gbm_fit_stratified)
+
+models_original$gbm <- gbm_fit
+models_smote$gbm <- gbm_fit_smote
+models_stf$gbm <- gbm_fit_stratified
+```
+
+model 6: bagging
+```{r}
+set.seed(1)
+bagg_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "treebag",
+                      metric = "ROC",
+                      trControl = ctrl)
+
+bagg_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "treebag",
+                      metric = "ROC",
+                      trControl = ctrl_smote)
+
+set.seed(1)
+bagg_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "treebag",
+                      metric = "ROC",
+                      trControl = ctrl_stratified)
+print(bagg_fit_stratified)
+models_original$Bagging <- bagg_fit
+models_smote$Bagging <- bagg_fit_smote
+models_stf$Bagging <- bagg_fit_stratified
+```
+
+model 7:Regularization
+```{r}
+set.seed(1000)
+library(glmnet)
+parameters <- c(seq(0, 0.3, by =0.01) )#,  seq(2, 5, 0.5))#) , seq(5, 25, 1))
+ridge_fit<- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glmnet",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl,
+                      tuneGrid = expand.grid(alpha = 0, lambda = parameters))
+ridge_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glmnet",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl_smote,
+                      tuneGrid = expand.grid(alpha = 0, lambda = parameters))
+ridge_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glmnet",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl_stratified,
+                      tuneGrid = expand.grid(alpha = 0, lambda = parameters))
+ 
+print(ridge_fit_stratified)
+
+models_original$Ridge <- ridge_fit
+models_smote$Ridge <- ridge_fit_smote
+models_stf$Ridge <- ridge_fit_stratified
+
+lasso_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glmnet",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl,
+                      tuneGrid = expand.grid(alpha = 1, lambda = parameters))
+lasso_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glmnet",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl_smote,
+                      tuneGrid = expand.grid(alpha = 1, lambda = parameters))
+lasso_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "glmnet",
+                      family = "binomial",
+                      metric = "ROC",
+                      trControl = ctrl_stratified,
+                      tuneGrid = expand.grid(alpha = 1, lambda = parameters))
+
+
+print(lasso_fit_stratified)
+models_original$Lasso <- lasso_fit
+models_smote$Lasso <- lasso_fit_smote
+models_stf$Lasso <- lasso_fit_stratified
+
+```
+model 8: Neural Network
+```{r}
+set.seed(1)
+library(nnet)
+garbage <- capture.output(nn_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "nnet",
+                      metric = "ROC",
+                      trControl = ctrl))
+
+garbage <- capture.output(nn_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "nnet",
+                      metric = "ROC",
+                      trControl = ctrl_smote))
+
+garbage <- capture.output(nn_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "nnet",
+                      metric = "ROC",
+                      trControl = ctrl_stratified))
+print(nn_fit_stratified)
+models_original$NeuralNetwork <- nn_fit
+models_smote$NeuralNetwork <- nn_fit_smote
+models_stf$NeuralNetwork <- nn_fit_stratified
+```
+model 9: Ada Boost
+```{r}
+set.seed(1000)
+library(ada)
+ada_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "ada",
+                      metric = "ROC",
+                      trControl = ctrl)
+ada_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "ada",
+                      metric = "ROC",
+                      trControl = ctrl_smote)
+ada_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "ada",
+                      metric = "ROC",
+                      trControl = ctrl_stratified)
+print(ada_fit_stratified)
+models_original$AdaBoost <- ada_fit
+models_smote$AdaBoost <- ada_fit_smote
+models_stf$AdaBoost <- ada_fit_stratified
+```
+model 10: SVM
+```{r}
+set.seed(1)
+library(e1071)
+# svm_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+#                       method = "svmLinearWeights",
+#                       metric = "ROC",
+#                       trControl = ctrl_smote)
+# print(svm_fit_smote)
+
+svm_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "svmLinear2",
+                      metric = "ROC",
+                      trControl = ctrl)
+svm_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "svmLinear2",
+                      metric = "ROC",
+                      trControl = ctrl_smote)
+svm_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "svmLinear2",
+                      metric = "ROC",
+                      trControl = ctrl_stratified)
+print(svm_fit_stratified)
+models_original$SVM <- svm_fit
+models_smote$SVM <- svm_fit_smote
+models_stf$SVM <- svm_fit_stratified
+```
+model 11: LDA
+```{r}
+set.seed(1)
+lda_fit <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "lda",
+                      metric = "ROC",
+                      trControl = ctrl)
+lda_fit_smote <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "lda",
+                      metric = "ROC",
+                      trControl = ctrl_smote)
+lda_fit_stratified <- train(Attrition ~ ., data = Attrition_with_dummies,
+                      method = "lda",
+                      metric = "ROC",
+                      trControl = ctrl_stratified)
+print(lda_fit_stratified)
+models_original$LDA <- lda_fit
+models_smote$LDA <- lda_fit_smote
+models_stf$LDA <- lda_fit_stratified
+```
+AUC of models
+```{r}
+library(kableExtra)
+
+print.result.table <- function(models_list){
+  Max<- lapply(lapply(models_list, `[[`, 'results'), subset, ROC == max(ROC))
+  df<- data.frame()
+  for(l in 1:length(Max)){
+    df[names(Max)[l],"AUC"] <- Max[[l]]$ROC
+    df[names(Max)[l],"Sensitivity"] <- Max[[l]]$Sens
+    #df[names(Max)[l],"Specificity"] <- Max[[l]]$Spec
+  }
+  
+  df <- round(df[order(df$AUC,decreasing = T),],3)
+  kable <- df %>% kbl() %>% kable_classic_2(full_width = F)
+  return(kable)
+}
+
+print.result.table(models_original)
+print.result.table(models_smote)
+print.result.table(models_stf)
+
+
+```
+ROC plots 
+```{r}
+library(plotROC)
+library(mlbench)
+
+g <- ggplot() + 
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "RandomForest"),rf_fit_stratified$pred,n.cuts=0,size = 0.5) + 
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Logistics"),logistic_fit_stratified$pred,n.cuts=0,size = 0.5)+
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "KNN"),knn_fit_stratified$pred,n.cuts=0,size = 0.5) +
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Decision Tree"),rpart_fit_stratified$pred,n.cuts=0,size = 0.5) + 
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "gbm"),gbm_fit_stratified$pred,n.cuts=0,size = 0.5) + 
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "bagging"),bagg_fit_stratified$pred,n.cuts=0,size = 0.5) +
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Ridge"),ridge_fit_stratified$pred,n.cuts=0,size = 0.5) +
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Lasso"),lasso_fit_stratified$pred,n.cuts=0,size = 0.5) +
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Neural Network"),nn_fit_stratified$pred,n.cuts=0,size = 0.5) +
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "SVM"),svm_fit_stratified$pred,n.cuts=0,size = 0.5) +
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "LDA"),lda_fit_stratified$pred,n.cuts=0,size = 0.5) +
+  coord_equal() +
+  style_roc()+
+  ggtitle("ROC curves")
+
+g
+
+# Select a parameter setting
+# gbm_parameter <- apply(gbm_fit_smote$pred[,colnames(gbm_fit_smote$bestTune)],1,function(x) {all(x==gbm_fit_smote$bestTune[1,])})
+# rf_parameter <- rf_fit_smote$pred$mtry == as.integer(rf_fit_smote$bestTune)
+# knn_parameter <- knn_fit_smote$pred$k == as.integer(knn_fit_smote$bestTune)
+# tree_parameter <- rpart_fit_smote$pred$cp == as.numeric(rpart_fit_smote$bestTune)
+# ridge_parameter <- ridge_fit_smote$pred$lambda == ridge_fit_smote$bestTune$lambda
+# lasso_parameter <- lasso_fit_smote$pred$lambda == lasso_fit_smote$bestTune$lambda
+# nn_parameter <- apply(nn_fit_smote$pred[,colnames(nn_fit_smote$bestTune)],1,function(x) {all(x==nn_fit_smote$bestTune[1,])})
+# ada_parameter <- apply(ada_fit_smote$pred[,colnames(ada_fit_smote$bestTune)],1,function(x) {all(x==ada_fit_smote$bestTune[1,])})
+# svm_parameter <-  svm_fit_smote$pred$cost == as.numeric(svm_fit_smote$bestTune)
+
+
+# g <- ggplot() + 
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "RandomForest"),rf_fit_smote$pred[rf_parameter,],n.cuts=0,size = 0.5) + 
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Logistics"),logistic_fit_smote$pred,n.cuts=0,size = 0.5)+
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "KNN"),knn_fit_smote$pred,n.cuts=0,size = 0.5) +
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Decision Tree"),rpart_fit_smote$pred[tree_parameter, ],n.cuts=0,size = 0.5) + 
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "gbm"),gbm_fit_smote$pred[gbm_parameter, ],n.cuts=0,size = 0.5) + 
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "bagging"),bagg_fit_smote$pred,n.cuts=0,size = 0.5) +
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Ridge"),ridge_fit_smote$pred[ridge_parameter, ],n.cuts=0,size = 0.5) +
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Lasso"),lasso_fit_smote$pred[lasso_parameter, ],n.cuts=0,size = 0.5) +
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Neural Network"),nn_fit_smote$pred[nn_parameter, ],n.cuts=0,size = 0.5) +
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "SVM"),svm_fit_smote$pred[svm_parameter, ],n.cuts=0,size = 0.5) +
+#   geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "LDA"),lda_fit_smote$pred,n.cuts=0,size = 0.5) +
+#   coord_equal() +
+#   style_roc()+
+#   ggtitle("ROC curves")
+
+
+
+```
+
+
+
+```{r}
+best <- ggplot() + 
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Logistics"),logistic_fit_smote$pred,n.cuts=0)+
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Ridge"),ridge_fit_smote$pred[ridge_parameter, ],n.cuts=0) +
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "Lasso"),lasso_fit_smote$pred[lasso_parameter, ],n.cuts=0) +
+  geom_roc(aes(m=Yes, d=factor(obs, levels = c("Yes", "No")), color= "AdaBoost"),ada_fit_smote$pred[ada_parameter, ],n.cuts=0) +
+  coord_equal() +
+  style_roc()
+
+best
+
+```
+Feature Importance of Logistics model
+```{r}
+featureRank <- varImp(logistic_fit_stratified, scale = FALSE)
+featureRank
+coef(logistic_fit_stratified$finalModel)[order(featureRank$importance$Overall,decreasing = T)+1][1:5] #coefficients of top 5 most important features
+
+```
+

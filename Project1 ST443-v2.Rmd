@@ -1,0 +1,395 @@
+---
+title: "Untitled"
+author: "Yi Lin Ye"
+date: "11/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(lattice)
+library(ggplot2)
+library(plyr)
+library(DMwR)
+library(dummies)
+library(car)
+library(corrplot)
+library(ROCR)
+library(rpart)
+library(rpart.plot)
+library(pROC)
+library(randomForest)
+
+Attrition1<- read.csv("~/desktop/WA_Fn-UseC_-HR-Employee-Attrition.csv")
+Attrition <- read.csv("~/desktop/WA_Fn-UseC_-HR-Employee-Attrition.csv")
+head(Attrition)
+summary(Attrition)
+names(Attrition)
+cat("Samples: ", nrow(Attrition), "\nFeatures: ", ncol(Attrition), "\n")
+table(sapply(Attrition, class))
+
+#check missing value (no missing values)
+sapply(Attrition, function(x) sum(is.na(x)))
+
+```
+
+```{r}
+#Removing Variables whose value is not changing
+Attrition <- Attrition[,-c(9,10,22,27)]
+
+
+# Changing the class of variable from numeric to factor
+factor.col=c("Education","EnvironmentSatisfaction","JobInvolvement",
+             "JobLevel","JobSatisfaction","StockOptionLevel",
+             "PerformanceRating","RelationshipSatisfaction",
+             "WorkLifeBalance")
+
+Attrition[factor.col] <- lapply(Attrition[factor.col], factor)
+
+
+Attrition[,"Attrition"] <- ifelse(Attrition[,"Attrition"]=="Yes",1,0)
+
+```
+
+Exploratory data analysis
+
+```{r}
+#Attrition imbalance in the dataset, attrition rate: 0.161
+sub_data_0 <-  as.factor(Attrition$Attrition)
+level_0 <-  levels(sub_data_0)
+count_0 <- plyr::count(sub_data_0)
+attrition_perc <- data.frame(AttritionStatus = level_0, Percentage = round(count_0[, 2]/sum(count_0[, 2]),3))
+
+  
+#which education field contributes most to attrition: Life Science--0.376
+sub_data_1 <- cbind(Attrition$Attrition, Attrition$EducationField)
+level_1 <- levels(as.factor(Attrition$EducationField))
+Pi_1 <- apply(sub_data_1,1,paste0,collapse="_") #combine the two columns into a vector
+count_1 <- plyr::count(Pi_1)
+edu_perc <- data.frame(EducationField = level_1, Percentage = round(count_1[7:12, 2]/sum(count_1[7:12, 2]),3)) #those with attrition=1
+edu_perc <- edu_perc[order(edu_perc$Percentage, decreasing = TRUE), ]
+
+#which job role contributes most to attrition: Laboratory Technician, Sales Executive, Research Scientist
+sub_data_2 <- cbind(Attrition$Attrition, Attrition$JobRole)
+level_2 <- levels(as.factor(Attrition$JobRole))
+Pi_2 <- apply(sub_data_2,1,paste0,collapse="_");
+count_2 <- plyr::count(Pi_2)
+temp <- count_2[10: nrow(count_2), ]
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+temp <- temp[order(temp$freq, decreasing = TRUE), ]
+job_perc <- data.frame(temp)
+
+#Empolyee with rather high education level and high job involvment tend to move forward in their careers
+sub_data_3 <- cbind(Attrition$Attrition, Attrition$Education, Attrition$JobInvolvement)
+level_3 <- levels(Attrition$Education)
+Pi_3 <- apply(sub_data_3,1,paste0,collapse="_");
+count_3 <- plyr::count(Pi_3)
+temp <- count_3[21: nrow(count_3), ]
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+temp <- temp[order(temp$freq, decreasing = TRUE), ]
+edu_job_perc <- data.frame(temp)
+
+#Empolyee with rather high education level and young age tend to move forward in their careers
+sub_data_4 <- cbind(Attrition$Attrition, Attrition$Education, Attrition$Age)
+level_4 <- levels(Attrition$Education)
+Pi_4 <- apply(sub_data_4,1,paste0,collapse="_");
+count_4 <- plyr::count(Pi_4)
+temp <- count_4[178: nrow(count_4), ]
+temp <- head(temp[order(temp$freq, decreasing = TRUE), ])
+temp$percent <-round(c(temp$freq / sum(temp$freq)), 3) 
+edu_age_perc <- data.frame(temp)
+
+```
+
+```{r}
+Attrition$TotalSatisfaction <- as.numeric(Attrition$EnvironmentSatisfaction)+ 
+                               as.numeric(Attrition$JobInvolvement)+
+                               as.numeric(Attrition$JobSatisfaction)+
+                               as.numeric(Attrition$RelationshipSatisfaction)+
+                               as.numeric(Attrition$WorkLifeBalance)
+Attrition <- Attrition[,-c(9,12,15,23,27)]
+Attrition$AgeGroup <- as.factor(ifelse(Attrition$Age<=24,"Young", ifelse(Attrition$Age<=54,"Middle-Age","Adult"))) #add a column AgeGroup
+Attrition <- Attrition[,-c(1)] #delete the original column
+
+
+#Attrition <- model.frame(lm1<-lm(Attrition ~., data = Attrition),Attrition)
+Attrition_matrix <- model.matrix(lm1<-lm(Attrition ~., data = Attrition), data=Attrition) #only gives the design matrix
+Attrition_matrix <- Attrition_matrix[,-c(1)] #delete the intercept column
+Attrition_with_dummies <- as.data.frame(Attrition_matrix)
+#Attrition1 <- read.csv("HR-Employee-Attrition.csv")
+Attrition1[,"Attrition"] <- ifelse(Attrition1[,"Attrition"]=="Yes",1,0)
+#cbind(Attrition1[,"Attrition"],Attrition_with_dummies)
+colnames(Attrition_with_dummies)[1] <- "Attrition" #rename the Attrition column
+
+```
+
+Splitting data
+```{r}
+
+set.seed(0)
+train_index <- sample(1:nrow(Attrition_with_dummies), nrow(Attrition_with_dummies)*0.7)
+
+train_df <- Attrition_with_dummies[train_index,]
+test_df <- Attrition_with_dummies[-train_index,]
+```
+
+Feature Engineering
+`
+```{r}
+#Variable Selection (VIF)
+library(car)
+vif_output <- lm(Attrition ~., data = train_df)
+names(vif_output$coefficients[is.na(vif_output$coefficients)])
+vif_res <- car::vif(vif_output)
+summary(vif_res)
+print(vif_res)
+
+vif_names <- names(vif_res)
+vif_res_new <- vif_res
+while(any(vif_res_new > 2)){
+  var_with_max_vif <- names(which(vif_res_new == max(vif_res_new)))
+  vif_names <- vif_names[!(vif_names) %in% var_with_max_vif]
+  def_form <- as.formula(paste("Attrition ~" ,paste(vif_names, collapse = " +"),sep = ""))
+  vif_output <- lm(def_form, data = train_df)
+  vif_res_new <- car::vif(vif_output)
+}
+summary(vif_res_new)
+print(vif_res_new)
+
+#vairables need to be removed
+Multicollinearity_vars <-  names(vif_res)[which(! names(vif_res) %in% names(vif_res_new))]
+
+train_df <- train_df[,!(names(train_df) %in% Multicollinearity_vars)]
+test_df <- test_df[,!(names(train_df) %in% Multicollinearity_vars)]
+
+#scale the data:
+numeric=c("Age","DailyRate","DistanceFromHome","HourlyRate","MonthlyIncome","MonthlyRate","NumCompaniesWorked","PercentSalaryHike","YearsAtCompany","YearsInCurrentRole","YearsSinceLastPromotion","YearsWithCurrManager","TotalWorkingYears","TrainingTimesLastYear","StockOptionLevel")
+
+train.num=scale(train_df[,names(train_df) %in% numeric])
+train.scale=cbind(train_df[,!names(train_df) %in% numeric],train.num)
+
+test.num=scale(test_df[,names(test_df) %in% numeric])
+test.scale=cbind(test_df[,!names(test_df) %in% numeric],test.num)
+```
+
+Oversampling to overcome the imbalance nature of the data
+```{r}
+p=prop.table(table(train.scale$Attrition))
+cat("Before SMOTE the propotions are:"); print(p,row.names=FALSE)
+set.seed(0)
+train.scale$Attrition <- as.factor(train.scale$Attrition)
+smote_train=SMOTE(Attrition ~ .,data=train.scale)
+q=prop.table(table(smote_train$Attrition))
+cat("After SMOTE the propotions are:"); print(q,row.names=FALSE)
+```
+
+Logistic Regression
+```{r}
+#fit the model on training set
+glm_fit = glm(Attrition ~.,
+              data = train.scale,
+              family = binomial)
+summary(glm_fit)
+#predict on testing test
+glm_probs = predict(glm_fit, test.scale, type = "response")
+
+# For predicted probabilities greater than 0.5, assign Y to be "Up"; otherwise assign Y to be "Down"
+glm_pred = rep(0, nrow(test.scale))
+glm_pred[glm_probs > .5] = 1
+
+# Create testing data for Y
+Attrition_test = Attrition_with_dummies$Attrition[-train_index]
+# Confusion matrix
+table(glm_pred, Attrition_test)
+# Proportation of make correct classification
+mean(glm_pred==Attrition_test)
+# Misclassfication error rate
+# glm_pred is the predicted Y for testing data and Attrition_test is the true Y for testing data
+mean(glm_pred!=Attrition_test)
+```
+
+
+```{r}
+# Fitting the Logistic Regression Model
+logmodel <- glm(Attrition ~., family=binomial(link="logit"), data = train.scale)
+print(summary(logmodel))
+
+# Accesing the predective ability of the logistic regression model
+log_pred <- predict(logmodel,newdata=test.scale,type='response')
+log_pred <- ifelse(log_pred>=0.5,1,0)
+caret::confusionMatrix(as.factor(log_pred),as.factor(test.scale$Attrition))
+
+# Plotting the ROC curve
+res <- predict(logmodel, train.scale, type = "response")
+ROCRPred <- prediction(res, train.scale$Attrition)
+ROCRPerf <- performance(ROCRPred,"tpr","fpr")
+plot(ROCRPerf,colorize = TRUE, print.cutoffs.at = seq(0.1, by = 0.1))
+
+# Chhose the thresold value 0.2 and make prediction
+results <- predict(logmodel,newdata=test.scale,type='response')
+results <- ifelse(results>=0.2,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = test.scale$Attrition,Predicted_value = results > 0.2)
+misClasificError1 <- mean(results != test.scale$Attrition)
+print(paste('Logistic Regression Accuracy',1-misClasificError1))
+
+# Chhose the thresold value 0.3 and make prediction
+results <- predict(logmodel,newdata=test.scale,type='response')
+results <- ifelse(results>=0.3,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = test.scale$Attrition,Predicted_value = results > 0.3)
+misClasificError1 <- mean(results != test.scale$Attrition)
+print(paste('Logistic Regression Accuracy',1-misClasificError1))
+
+# Chhose the thresold value 0.4 and make prediction  ###highest predictive accuracy 
+results <- predict(logmodel,newdata=test.scale,type='response')
+results <- ifelse(results>=0.4,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = test.scale$Attrition,Predicted_value = results > 0.4)
+misClasificError1 <- mean(results != test.scale$Attrition)
+print(paste('Logistic Regression Accuracy',1-misClasificError1))
+
+
+logi.roc <- roc(test.scale$Attrition,log_pred)
+logi.roc$auc
+
+logi2.roc <- roc(test.scale$Attrition,results)
+logi2.roc$auc
+```
+
+```{r}
+# Feature analysis 
+# Based upon the p-value of anova
+anova(logmodel, test = "Chisq")
+```
+
+```{r}
+logmodel2 <- glm(Attrition~GenderMale+`AgeGroupMiddle-Age`, family=binomial(link="logit"),train.scale)
+print(summary(logmodel2))
+# Accesing the predective ability of the logistic regression model
+log_pred <- predict(logmodel2,newdata=test.scale[,c("GenderMale","AgeGroupMiddle-Age")],type='response')
+log_pred <- ifelse(log_pred>=0.5,1,0)
+caret::confusionMatrix(as.factor(log_pred),as.factor(test.scale$Attrition))
+
+
+```
+
+SMOTE Logit
+```{r}
+# Fitting the Logistic Regression Model
+logmodel <- glm(Attrition ~., family=binomial(link="logit"), data = smote_train)
+print(summary(logmodel))
+
+# Accesing the predective ability of the logistic regression model
+log_pred <- predict(logmodel,newdata=test.scale,type='response')
+log_pred <- ifelse(log_pred>=0.5,1,0)
+caret::confusionMatrix(as.factor(log_pred),as.factor(test.scale$Attrition))
+
+# Plotting the ROC curve
+res <- predict(logmodel, smote_train, type = "response")
+ROCRPred <- prediction(res, smote_train$Attrition)
+ROCRPerf <- performance(ROCRPred,"tpr","fpr")
+plot(ROCRPerf,colorize = TRUE, print.cutoffs.at = seq(0.1, by = 0.1))
+
+# Chhose the thresold value 0.2 and make prediction
+results <- predict(logmodel,newdata=test.scale,type='response')
+results <- ifelse(results>=0.2,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = test.scale$Attrition,Predicted_value = results > 0.2)
+misClasificError1 <- mean(results != test.scale$Attrition)
+print(paste('Logistic Regression Accuracy',1-misClasificError1))
+
+# Chhose the thresold value 0.3 and make prediction
+results <- predict(logmodel,newdata=test.scale,type='response')
+results <- ifelse(results>=0.3,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = test.scale$Attrition,Predicted_value = results > 0.3)
+misClasificError1 <- mean(results != test.scale$Attrition)
+print(paste('Logistic Regression Accuracy',1-misClasificError1))
+
+# Chhose the thresold value 0.4 and make prediction  ###highest predictive accuracy 
+results <- predict(logmodel,newdata=test.scale,type='response')
+results <- ifelse(results>=0.4,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = test.scale$Attrition,Predicted_value = results > 0.4)
+misClasificError1 <- mean(results != test.scale$Attrition)
+print(paste('Logistic Regression Accuracy',1-misClasificError1))
+
+
+```
+
+Decision Tree & Tree Pruning 
+```{r}
+
+
+tree.model <- rpart(Attrition ~., data = train.scale) #smote_train
+tree.preds <- predict(tree.model, test.scale, type = "class")
+
+caret::confusionMatrix(as.factor(tree.preds),as.factor(test.scale$Attrition))
+
+tree.roc <- roc(test.scale$Attrition, as.numeric(tree.preds))
+tree.roc$auc
+
+# Pruning & plotting the tree
+prun.tree <- prune(tree.model, cp = 0.1)  #select a cp
+prtree.pred <- predict(prun.tree, test.scale, type = "class")
+caret::confusionMatrix(as.factor(prtree.pred),as.factor(test.scale$Attrition))
+
+prtree.roc <- roc(test.scale$Attrition, as.numeric(levels(prtree.pred)[as.numeric(prtree.pred)]))
+prtree.roc$auc
+
+rpart.plot(prun.tree, 
+           type =5, 
+           extra = 104, 
+           tweak = 0.9, 
+           fallen.leaves = F)
+
+
+
+```
+Random Forest 
+```{r}
+set.seed(1000)
+
+rf.model <- randomForest(Attrition ~. , data = Attrition[train_index,])
+rf.pred <- predict(rf.model, Attrition[-train_index,], type = "class")
+rf.pred <- ifelse(rf.pred>=0.5,1,0)
+caret::confusionMatrix(as.factor(rf.pred),as.factor(Attrition[-train_index,"Attrition"]))
+
+rf.roc <- roc(as.numeric(Attrition[-train_index,"Attrition"]), as.numeric(rf.pred))
+rf.roc$auc
+```
+
+```{r }
+# set.seed(0)
+# # Setting the basic train control used in all GBM models
+# 
+# ctrl <- trainControl(method = "cv",
+#                      number = 10,
+#                      summaryFunction = twoClassSummary,
+#                      classProbs = TRUE)
+# 
+# # Simple GBM
+# 
+# 
+# gbmfit <- train(Attrition ~., 
+#                 data = Attrition[train_index,], 
+#                 method = "gbm", 
+#                 verbose = FALSE, 
+#                 metric = "ROC", 
+#                 trControl = ctrl)
+# 
+# gbmpreds <- predict(gbmfit, test)
+```
+
+```{r}
+plot(logi2.roc, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, main = "ROC curves", col = "salmon")
+plot(rf.roc, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "darkolivegreen", add = T)
+plot(logi.roc, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "steelblue", add = T)
+plot(tree.roc, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "burlywood", add = T)
+```
+

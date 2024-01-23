@@ -1,0 +1,185 @@
+---
+title: "ST443_p2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+```{r}
+library(readxl)
+library(corrplot)
+library(caret)
+library(glmnet)
+library(randomForest)
+library(nnet)
+library(xgboost)
+library(gbm)
+library(dplyr)
+library(jtools)
+library(tidyr)
+library(e1071)
+library(gridExtra)
+library(kableExtra)
+```
+
+```{r}
+Concrete_Data <- read_excel("~/Desktop/ST443 Machine Learning and Data Mining/Project/Concrete_Data.xls")
+names(Concrete_Data) <- gsub(" ","", sub("\\(.*", "", names(Concrete_Data))) #rename
+names(Concrete_Data)[9] <- "CC.Strength"
+sapply(Concrete_Data,function(df) sum(is.na(df))) #any NA
+
+```
+EDA
+```{r}
+corrplot(cor(Concrete_Data), method = "color",type="upper", order="hclust", number.cex = 0.8,
+         addCoef.col = "black",,tl.cex = 0.6, #Text label color and rotation
+         diag = F) 
+pairs(Concrete_Data)
+```
+Data Preperation
+```{r echo= FALSE, include = FALSE}
+#train test split
+set.seed(1)
+train.idx<-createDataPartition(y=Concrete_Data$Cement,p=0.7,list=FALSE)
+train.set<-Concrete_Data[train.idx,]
+test.set<-Concrete_Data[-train.idx,]
+#scale
+train.scale <- scale(train.set)
+test.scale <- scale(test.set)
+```
+
+```{r}
+#10-fold cv
+set.seed(100)
+ctrl <- trainControl(method = "cv", 
+                     number = 10,
+                     savePredictions = "final",
+                     preProcOptions= c("center","scale"))
+
+```
+Regression
+Model1: Linear regression
+Model2: Ridge
+Model3: Lasso
+Model4: Elastic Net
+
+```{r}
+
+#linear
+linear_fit <- train( CC.Strength~ ., data = Concrete_Data,
+                      method = "lm",
+                      trControl = ctrl)
+
+#ridge
+parameters <- c(seq(0, 1, by =0.05))#,  seq(2, 5, 0.5) , seq(5, 25, 1))
+ridge_fit<- train(CC.Strength ~ ., data = Concrete_Data,
+                      method = "glmnet",
+                      trControl = ctrl,
+                      tuneGrid = expand.grid(alpha = 0, lambda = parameters))
+
+#lasso
+lasso_fit<- train(CC.Strength ~ ., data = Concrete_Data,
+                      method = "glmnet",
+                      trControl = ctrl,
+                      tuneGrid = expand.grid(alpha = 1, lambda = parameters))
+
+
+#elastic net
+elasticNet_fit <- train(CC.Strength ~ ., data = Concrete_Data,
+                      method = "glmnet",
+                      trControl = ctrl)
+
+
+```
+Tree base
+Model4: Decision tree
+Model5: Random Forest
+Model6: Gradient Boosting Machines
+```{r}
+#decision tree
+dt_fit <- train(CC.Strength~ ., data = Concrete_Data,
+                      method = "rpart",
+                      trControl = ctrl)
+
+plot(dt_fit)
+
+# Plot the final tree model
+par(xpd = NA) 
+plot(dt_fit$finalModel)
+text(dt_fit$finalModel, digits = 3)
+
+#random forest
+#rf.set <- data.frame(mtry = seq(2, 10, by =2))
+rf_fit <- train(CC.Strength~., data = Concrete_Data, 
+                method = "rf",
+                trControl = ctrl)#, tuneGrid = rf.set)
+plot(rf_fit)
+
+#gradient boosting machines
+gbm.set <- expand.grid(shrinkage = seq(0.1, 1, by = 0.2), 
+                  interaction.depth = c(1, 3, 7),
+                  n.minobsinnode = c(2, 5, 10),
+                  n.trees = c(100, 300, 500))
+
+gbm_fit <- train(CC.Strength ~ ., data = Concrete_Data,  
+                   method = "gbm", trControl = ctrl,
+                   tuneGrid =gbm.set, verbose = FALSE)
+
+
+```
+KNN
+```{r}
+knn_fit <- train(CC.Strength ~ ., data = Concrete_Data, 
+                 method = "knn", trControl = ctrl)
+plot(knn_fit)
+```
+
+Neural Network
+```{r}
+garbage <- capture.output(nn_fit <- train(CC.Strength~., data = Concrete_Data,
+                      method = "nnet",
+                      trControl = ctrl,verbose = FALSE))
+```
+SVM
+```{r}
+svm_fit <- train(CC.Strength ~ ., data = Concrete_Data,
+                      method = "svmLinear2",
+                      trControl = ctrl)
+```
+
+```{r}
+model_list <- list(Linear = linear_fit, Ridge = ridge_fit,ElasticNet =elasticNet_fit, DecisionTree = dt_fit, GBM = gbm_fit, RandomForest = rf_fit,KNN = knn_fit,NeuralNetwork = nn_fit,SVM = svm_fit)
+res <- resamples(model_list,decreasing = FALSE)
+model_summary <- as.data.frame(colMeans(res$values[,-1]))
+model_summary$Model <- sub("\\~.*","",rownames(model_summary))
+model_summary$Metric <- sub(".*\\~","",rownames(model_summary))
+model_table <- model_summary %>% spread(value = `colMeans(res$values[, -1])`,key = Metric) %>% arrange(RMSE) %>% mutate_if(is.numeric, round, digits=3)
+model_table %>% kbl() %>% kable_classic_2(full_width = F)
+
+#summary(res)
+compare_models(gbm_fit, elasticNet_fit) #gbm perform much better than linear methods
+compare_models(gbm_fit, rf_fit) #rf and gbm yield similar results
+
+```
+
+```{r}
+
+plot1 <- ggplot(linear_fit$pred, aes(x=pred, y=obs)) + geom_point(col ="black",alpha=.5)+ geom_abline(slope = 1,col = "blue",cex = 1,lty = 2) + labs(title = "Linear Regression", x= "Prediction",y = "Observed")
+
+plot2 <- ggplot(gbm_fit$pred, aes(x=pred, y=obs)) + geom_point(col ="black",alpha=.5)+ geom_abline(slope = 1,col = "blue",cex = 1,lty = 2) + labs(title = "GBM", x= "Prediction",y = "Observed")
+
+grid.arrange(plot1, plot2, ncol=2)
+
+# effect_plot(linear_fit$finalModel, pred =Cement, interval = TRUE, plot.points = TRUE)
+# plot_summs(linear_fit$finalModel, scale = TRUE, plot.distributions = TRUE, inner_ci_level = .9)
+
+par(mar = c(5, 8, 1, 1))
+summary(gbm_fit,las =1)
+
+#random forest feature importance
+importance(rf_fit$finalModel)#[order(importance(rf_fit$finalModel),decreasing =T )]
+
+```
+

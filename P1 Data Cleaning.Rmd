@@ -1,0 +1,107 @@
+---
+title: "Untitled"
+author: "Yi Lin Ye"
+date: "11/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(DMwR)
+Attrition <- read.csv("~/Desktop/WA_Fn-UseC_-HR-Employee-Attrition.csv")
+head(Attrition)
+summary(Attrition)
+#check missing value
+sapply(Attrition, function(x) sum(is.na(x)))
+
+
+```
+
+```{r}
+#Removing Variables whose value is not changing
+
+Attrition <- Attrition[,-c(9,10,22,27)]
+
+
+
+
+# Changing the class of variable from numeric to factor
+factor.col=c("Education","EnvironmentSatisfaction","JobInvolvement",
+             "JobLevel","JobSatisfaction","StockOptionLevel",
+             "PerformanceRating","RelationshipSatisfaction",
+             "WorkLifeBalance")
+
+Attrition[factor.col] <- lapply(Attrition[factor.col], factor)
+
+Attrition[,"Attrition"] <- ifelse(Attrition[,"Attrition"]=="Yes",1,0)
+
+Attrition <- dummy.data.frame(Attrition, sep = ".")
+
+# remove one dummy variable from each factor variable
+Attrition <- Attrition[,-c(3,7,11,16,25,26,32,37,39,50,51,58,61,65,69,75)]
+
+
+```
+Variable Selection (VIF)
+```{r}
+vif_output <- lm(Attrition ~., data = Attrition)
+vif_res <- car::vif(vif_output)
+summary(vif_res)
+print(vif_res)
+
+vif_names <- names(vif_res)
+vif_res_new <- vif_res
+while(any(vif_res_new > 2)){
+  var_with_max_vif <- names(which(vif_res_new == max(vif_res_new)))
+  vif_names <- vif_names[!(vif_names) %in% var_with_max_vif]
+  def_form <- as.formula(paste("Attrition ~" ,paste(vif_names, collapse = " +"),sep = ""))
+  vif_output <- lm(def_form, data = attira)
+  vif_res_new <- car::vif(vif_output)
+}
+summary(vif_res_new)
+print(vif_res_new)
+
+#vairables need to be removed
+Multicollinearity_vars <-  names(vif_res)[which(! names(vif_res) %in% names(vif_res_new))]
+
+Attrition <- Attrition[,!(names(Attrition) %in% Multicollinearity_vars)]
+
+```
+
+```{r}
+# Splitting our data
+Attrition$Attrition <- as.factor(Attrition$Attrition)
+set.seed(0)
+train_index <- sample(1:nrow(Attrition), nrow(Attrition)*0.7)
+test_index = -train_index
+
+train_df <- Attrition[train_index,]
+test_df <- Attrition[test_index,]
+
+#scale the data:
+numeric=c("Age","DailyRate","DistanceFromHome","HourlyRate","MonthlyIncome","MonthlyRate","NumCompaniesWorked","PercentSalaryHike","YearsAtCompany","YearsInCurrentRole","YearsSinceLastPromotion","YearsWithCurrManager","TotalWorkingYears","TrainingTimesLastYear","StockOptionLevel")
+
+train.num=scale(train_df[,names(train_df) %in% numeric])
+train.scale=cbind(train_df[,!names(train_df) %in% numeric],train.num)
+
+test.num=scale(test_df[,names(test_df) %in% numeric])
+test.scale=cbind(test_df[,!names(test_df) %in% numeric],test.num)
+```
+
+Oversampling to overcome the imbalance nature of the data
+```{r}
+p=prop.table(table(train.scale$Attrition))
+cat("Before SMOTE the propotions are:"); print(p,row.names=FALSE)
+set.seed(0)
+#train.scale$Attrition <- as.factor(train.scale$Attrition)
+smote_train=SMOTE(Attrition ~ .,data=train.scale)
+q=prop.table(table(smote_train$Attrition))
+cat("After SMOTE the propotions are:"); print(q,row.names=FALSE)
+
+
+```
+
